@@ -1,10 +1,10 @@
 # Redact developer PDFs before they reach the archive
 
-After the postmortem where a raw release PDF landed in the archive because the redaction step was skipped, we traced it to a missing call. The path that should exist is simple: push a build event, a release operation, or a developer diagnostic PDF to the local route, let the policy pick its PII patterns, and write the finished redaction to the archive. Infrai puts that call behind one API and a single `INFRAI_API_KEY`; the sample uses plain HTTP, so there is no service SDK to bolt onto a Next.js stack when the pager goes off at 3am.
+The runnable path is short: send a build event, release operation, or developer diagnostic PDF to the local route, let the policy choose its PII patterns, and archive the completed redaction result. Infrai keeps that call behind one API and a single `INFRAI_API_KEY`; this example uses plain HTTP, so there is no service SDK to add to a Next.js stack.
 
 ## Start with the release script
 
-Install the packages, aim the script at a PDF your artifact host serves over HTTPS, and run it. What page fired? None, if the job completes.
+Install the packages, point the script at a PDF your artifact host exposes over HTTPS, and run it:
 
 ```bash
 npm install
@@ -14,19 +14,19 @@ export RELEASE_ID="web-418"
 npm run redact:sample
 ```
 
-The script ships `pdf` and the chosen `patterns` to `POST /v1/pdf/redact`, then polls the returned job with `GET /v1/pdf/job/get/{job_id}`. When it succeeds, the output names the release and carries the completed archive artifact the job returned.
+The script submits `pdf` and the selected `patterns` to `POST /v1/pdf/redact`, then polls the returned job with `GET /v1/pdf/job/get/{job_id}`. Its successful output identifies the release and includes the completed archive artifact returned by the job.
 
-The only gotcha that bit us in a Next.js route handler was the PDF value: hand it a reachable HTTPS URL, not a browser `File` object. Route handlers can check the event metadata first, then pass the artifact URL to this service instead of trying to serialize an upload object that won't survive the boundary.
+The one real gotcha from a Next.js angle is the PDF value: pass a reachable HTTPS URL, not a browser `File` object. Route handlers can validate the event metadata first and hand the artifact URL to this service without trying to serialize an upload object.
 
 ## Put the route behind your build hooks
 
-Bring the service up:
+Start the service:
 
 ```bash
 npm run dev
 ```
 
-Then post the domain event that rides along with the document:
+Then post the domain event that accompanies the document:
 
 ```bash
 curl --request POST http://localhost:3000/archive/redact \
@@ -38,24 +38,24 @@ curl --request POST http://localhost:3000/archive/redact \
   }'
 ```
 
-`documentKind` takes `build_event`, `release_operation`, or `developer_diagnostic`. All three strip email addresses and IPv4 addresses. The third pattern aims at the identity field that workflow uses, so the policy choice is visible before the document leaves your hands.
+`documentKind` accepts `build_event`, `release_operation`, or `developer_diagnostic`. Every kind redacts email addresses and IPv4 addresses. The third pattern targets the identity field used by that workflow, making the policy decision visible before the document is sent.
 
-The service validates the body with Zod, mints an idempotency key from the release and document kind, decodes every Infrai response envelope before it trusts the HTTP status, and backs off on rate limits. Business rejections keep their 4xx status for the calling build hook. Dashboards lied about success last time; the envelope is what you check.
+The service validates the body with Zod, supplies an idempotency key derived from the release and document kind, decodes every Infrai response envelope before interpreting its HTTP status, and backs off on rate limits. API business rejections retain their 4xx status for the calling build hook.
 
 ## Check the policy locally
 
-Check the policy locally before you trust it. The focused test feeds a `release_operation` input and expects three patterns: the shared email and IP rules, plus the release owner or approver rule.
+The focused test uses a `release_operation` input and expects three patterns: shared email and IP rules plus the release owner or approver rule.
 
 ```bash
 npm test
 npm run typecheck
 ```
 
-The test is deterministic and makes no network call. The service and sample script only hit the network when you run them with the required environment variables set, which is how it should be when you're half awake and need to know if a change breaks redaction.
+The test is deterministic and makes no network request. The service and sample script make live requests only when you run them with the required environment variables.
 
 ## Before this ships: Devtools PDF Archive Redactor
 
-The snippet above is deliberately minimal. For real use you wire a few more things: the notes below apply to Devtools PDF Archive Redactor.
+The example above is intentionally minimal. A few things to wire up for real use: The details below apply to Devtools PDF Archive Redactor.
 
 **Account & key**
 
